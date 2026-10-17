@@ -368,12 +368,24 @@ router.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Respons
     // Agent Isolation: An agent can only update tickets assigned to them!
     if (req.user?.role === "AGENT") {
       const currentUserId = req.user.userId;
-      const isAssigned =
-        (ticket.assignedTo && ticket.assignedTo.toString() === currentUserId) ||
-        (ticket.assignedAgents &&
-          ticket.assignedAgents.some((id: any) => id.toString() === currentUserId));
+      const assignedToId = ticket.assignedTo
+        ? ((ticket.assignedTo as any)._id
+            ? (ticket.assignedTo as any)._id.toString()
+            : ticket.assignedTo.toString())
+        : null;
 
-      if (!isAssigned) {
+      const isAssigned =
+        assignedToId === currentUserId ||
+        (Array.isArray(ticket.assignedAgents) &&
+          ticket.assignedAgents.some((id: any) => {
+            const agId = id?._id ? id._id.toString() : id?.toString();
+            return agId === currentUserId;
+          }));
+
+      const isUnassigned =
+        !ticket.assignedTo && (!ticket.assignedAgents || ticket.assignedAgents.length === 0);
+
+      if (!isAssigned && !isUnassigned) {
         res.status(403).json({
           error: "Permission Denied: You cannot modify or resolve tickets assigned to another support agent.",
         });
@@ -444,16 +456,35 @@ router.post("/:id/comments", requireAuth, async (req: AuthenticatedRequest, res:
 
     if (req.user?.role === "AGENT") {
       const currentUserId = req.user.userId;
-      const isAssigned =
-        (ticket.assignedTo && ticket.assignedTo.toString() === currentUserId) ||
-        (ticket.assignedAgents &&
-          ticket.assignedAgents.some((id: any) => id.toString() === currentUserId));
+      const assignedToId = ticket.assignedTo
+        ? ((ticket.assignedTo as any)._id
+            ? (ticket.assignedTo as any)._id.toString()
+            : ticket.assignedTo.toString())
+        : null;
 
-      if (!isAssigned) {
+      const isAssigned =
+        assignedToId === currentUserId ||
+        (Array.isArray(ticket.assignedAgents) &&
+          ticket.assignedAgents.some((id: any) => {
+            const agId = id?._id ? id._id.toString() : id?.toString();
+            return agId === currentUserId;
+          }));
+
+      const isUnassigned =
+        !ticket.assignedTo && (!ticket.assignedAgents || ticket.assignedAgents.length === 0);
+
+      if (!isAssigned && !isUnassigned) {
         res.status(403).json({
           error: "Permission Denied: You cannot reply to tickets assigned to another support agent.",
         });
         return;
+      }
+
+      // If replying to an unassigned ticket, claim it for this agent
+      if (isUnassigned) {
+        ticket.assignedTo = req.user.userId as any;
+        ticket.assignedAgents = [req.user.userId as any];
+        ticket.lastAssignedAt = new Date();
       }
     }
 
@@ -512,12 +543,24 @@ router.post("/:id/escalate", requireAuth, async (req: AuthenticatedRequest, res:
 
     if (req.user?.role === "AGENT") {
       const currentUserId = req.user.userId;
-      const isAssigned =
-        (ticket.assignedTo && ticket.assignedTo.toString() === currentUserId) ||
-        (ticket.assignedAgents &&
-          ticket.assignedAgents.some((id: any) => id.toString() === currentUserId));
+      const assignedToId = ticket.assignedTo
+        ? ((ticket.assignedTo as any)._id
+            ? (ticket.assignedTo as any)._id.toString()
+            : ticket.assignedTo.toString())
+        : null;
 
-      if (!isAssigned) {
+      const isAssigned =
+        assignedToId === currentUserId ||
+        (Array.isArray(ticket.assignedAgents) &&
+          ticket.assignedAgents.some((id: any) => {
+            const agId = id?._id ? id._id.toString() : id?.toString();
+            return agId === currentUserId;
+          }));
+
+      const isUnassigned =
+        !ticket.assignedTo && (!ticket.assignedAgents || ticket.assignedAgents.length === 0);
+
+      if (!isAssigned && !isUnassigned) {
         res.status(403).json({
           error: "Permission Denied: You cannot escalate tickets assigned to another support agent.",
         });

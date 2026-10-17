@@ -175,7 +175,16 @@ router.get("/me", requireAuth, async (req: AuthenticatedRequest, res: Response):
       });
     }
 
-    res.json({ user, assignedTicketsCount });
+    const userData = {
+      _id: user._id.toString(),
+      userId: user._id.toString(),
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      createdAt: user.createdAt,
+    };
+
+    res.json({ user: userData, assignedTicketsCount });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch user" });
   }
