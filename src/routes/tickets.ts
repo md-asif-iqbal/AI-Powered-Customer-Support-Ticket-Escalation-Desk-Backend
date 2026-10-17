@@ -37,24 +37,37 @@ const CommentSchema = z.object({
 // GET /api/tickets (Filterable list)
 router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
-    const { status, priority, category, q } = req.query;
-    const query: Record<string, unknown> = {};
+    const { status, priority, category, q, assignedToMe } = req.query;
+    const andConditions: Record<string, unknown>[] = [];
 
     if (req.user?.role === "CUSTOMER") {
-      query.customer = req.user.userId;
+      andConditions.push({ customer: req.user.userId });
     }
 
-    if (status && status !== "ALL") query.status = status;
-    if (priority && priority !== "ALL") query.priority = priority;
-    if (category && category !== "ALL") query.category = category;
+    if (assignedToMe === "true" && req.user) {
+      andConditions.push({
+        $or: [
+          { assignedTo: req.user.userId },
+          { assignedAgents: req.user.userId },
+        ],
+      });
+    }
+
+    if (status && status !== "ALL") andConditions.push({ status });
+    if (priority && priority !== "ALL") andConditions.push({ priority });
+    if (category && category !== "ALL") andConditions.push({ category });
 
     if (q && typeof q === "string") {
-      query.$or = [
-        { title: { $regex: q, $options: "i" } },
-        { ticketNumber: { $regex: q, $options: "i" } },
-        { description: { $regex: q, $options: "i" } },
-      ];
+      andConditions.push({
+        $or: [
+          { title: { $regex: q, $options: "i" } },
+          { ticketNumber: { $regex: q, $options: "i" } },
+          { description: { $regex: q, $options: "i" } },
+        ],
+      });
     }
+
+    const query = andConditions.length > 0 ? { $and: andConditions } : {};
 
     const tickets = await Ticket.find(query)
       .populate("customer", "name email role")
@@ -85,6 +98,14 @@ router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response): P
 // POST /api/tickets (Create with AI analysis & auto-escalate)
 router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    // Role restriction: Support agents cannot create customer support tickets
+    if (req.user?.role === "AGENT") {
+      res.status(403).json({
+        error: "Support agents cannot submit customer support tickets. Tickets must be submitted by customers or administrators.",
+      });
+      return;
+    }
+
     const parseResult = CreateTicketSchema.safeParse(req.body);
     if (!parseResult.success) {
       res.status(400).json({ error: "Validation failed", details: parseResult.error.flatten() });
@@ -340,6 +361,22 @@ router.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Respons
       }
     }
 
+    // Agent Isolation: An agent can only update tickets assigned to them!
+    if (req.user?.role === "AGENT") {
+      const currentUserId = req.user.userId;
+      const isAssigned =
+        (ticket.assignedTo && ticket.assignedTo.toString() === currentUserId) ||
+        (ticket.assignedAgents &&
+          ticket.assignedAgents.some((id: any) => id.toString() === currentUserId));
+
+      if (!isAssigned) {
+        res.status(403).json({
+          error: "Permission Denied: You cannot modify or resolve tickets assigned to another support agent.",
+        });
+        return;
+      }
+    }
+
     ticket.status = newStatus as TicketStatus;
     if (assignedTo !== undefined) {
       ticket.assignedTo = assignedTo ? (assignedTo as unknown as typeof ticket.assignedTo) : undefined;
@@ -393,6 +430,29 @@ router.post("/:id/comments", requireAuth, async (req: AuthenticatedRequest, res:
       return;
     }
 
+    // Role checks
+    if (req.user?.role === "CUSTOMER") {
+      if (ticket.customer.toString() !== req.user.userId) {
+        res.status(403).json({ error: "Forbidden: You can only reply to your own tickets" });
+        return;
+      }
+    }
+
+    if (req.user?.role === "AGENT") {
+      const currentUserId = req.user.userId;
+      const isAssigned =
+        (ticket.assignedTo && ticket.assignedTo.toString() === currentUserId) ||
+        (ticket.assignedAgents &&
+          ticket.assignedAgents.some((id: any) => id.toString() === currentUserId));
+
+      if (!isAssigned) {
+        res.status(403).json({
+          error: "Permission Denied: You cannot reply to tickets assigned to another support agent.",
+        });
+        return;
+      }
+    }
+
     const parseResult = CommentSchema.safeParse(req.body);
     if (!parseResult.success) {
       res.status(400).json({ error: "Validation failed" });
@@ -432,6 +492,28 @@ router.post("/:id/escalate", requireAuth, async (req: AuthenticatedRequest, res:
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
+    }
+
+    if (req.user?.role === "CUSTOMER") {
+      if (ticket.customer.toString() !== req.user.userId) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    }
+
+    if (req.user?.role === "AGENT") {
+      const currentUserId = req.user.userId;
+      const isAssigned =
+        (ticket.assignedTo && ticket.assignedTo.toString() === currentUserId) ||
+        (ticket.assignedAgents &&
+          ticket.assignedAgents.some((id: any) => id.toString() === currentUserId));
+
+      if (!isAssigned) {
+        res.status(403).json({
+          error: "Permission Denied: You cannot escalate tickets assigned to another support agent.",
+        });
+        return;
+      }
     }
 
     const parseResult = EscalateSchema.safeParse(req.body);

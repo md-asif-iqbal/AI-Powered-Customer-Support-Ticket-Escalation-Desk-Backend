@@ -1,6 +1,7 @@
 import { Router, Response } from "express";
 import { z } from "zod";
 import { User } from "../models/User.js";
+import { Ticket } from "../models/Ticket.js";
 import {
   hashPassword,
   comparePassword,
@@ -165,7 +166,16 @@ router.get("/me", requireAuth, async (req: AuthenticatedRequest, res: Response):
       res.status(404).json({ error: "User not found" });
       return;
     }
-    res.json({ user });
+
+    let assignedTicketsCount = 0;
+    if (user.role === "AGENT" || user.role === "ADMIN") {
+      assignedTicketsCount = await Ticket.countDocuments({
+        $or: [{ assignedTo: user._id }, { assignedAgents: user._id }],
+        status: { $in: ["OPEN", "IN_PROGRESS", "ESCALATED"] },
+      });
+    }
+
+    res.json({ user, assignedTicketsCount });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch user" });
   }
