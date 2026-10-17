@@ -16,34 +16,42 @@ export function analyzeTicketHeuristically(
     "furious", "angry", "terrible", "worst", "unacceptable", "scam",
     "ridiculous", "sue", "lawsuit", "refund now", "cancel subscription",
     "disaster", "horrible", "broken for days", "lost money", "urgent",
-    "emergency", "down", "crash", "hacked", "stolen"
+    "emergency", "down", "crash", "hacked", "stolen", "churi", "harassment",
+    "unjustified", "why deactivated"
   ];
 
   const negativeWords = [
     "not working", "fails", "failed", "bug", "error", "problem", "glitch",
     "slow", "cannot", "can't", "unable", "frustrated", "delay", "waiting",
-    "disappointed", "stuck", "wrong", "missing"
+    "disappointed", "stuck", "wrong", "missing", "deactivate", "deactivated",
+    "deactivating", "suspended", "suspend", "banned", "ban", "blocked", "block",
+    "disabled", "disable", "locked", "lost access", "denied", "cannot login",
+    "cant login", "solve koro", "keno", "somossa", "somossha", "bondho",
+    "kaj kore na", "kaj korche na", "problem hocche", "help koro"
   ];
 
   const positiveWords = [
     "thanks", "thank you", "great", "awesome", "appreciate", "helpful",
-    "love", "quick", "fixed", "good"
+    "love", "quick", "fixed", "good", "dhonnobad"
   ];
 
   const billingWords = [
     "charge", "charged", "billing", "invoice", "payment", "credit card",
-    "refund", "subscription", "pricing", "dollar", "taka", "receipt"
+    "refund", "subscription", "pricing", "dollar", "taka", "receipt", "pay",
+    "bkash", "nagad", "kete nise", "keteche"
   ];
 
   const techWords = [
     "api", "server", "crash", "database", "500", "404", "stack trace",
     "exception", "code", "latency", "timeout", "frontend", "backend",
-    "deploy", "docker", "bug"
+    "deploy", "docker", "bug", "outage", "downtime"
   ];
 
   const accountWords = [
-    "login", "password", "reset", "2fa", "otp", "profile", "access",
-    "permission", "locked", "email change", "authenticate"
+    "account", "login", "password", "reset", "2fa", "otp", "profile", "access",
+    "permission", "locked", "email change", "authenticate", "deactivate",
+    "deactivated", "suspended", "suspend", "banned", "ban", "blocked", "disabled",
+    "reactivate", "reactivation", "unban", "kyc", "verification", "user", "akount", "khata"
   ];
 
   let angryCount = 0;
@@ -98,7 +106,20 @@ export function analyzeTicketHeuristically(
   if (sentiment === "FRUSTRATED") urgencyScore += 45;
   else if (sentiment === "NEGATIVE") urgencyScore += 25;
   if (angryCount > 0) urgencyScore += 20;
-  if (fullText.includes("urgent") || fullText.includes("immediately") || fullText.includes("outage")) urgencyScore += 25;
+  if (fullText.includes("urgent") || fullText.includes("immediately") || fullText.includes("outage")) {
+    urgencyScore += 25;
+  }
+  if (
+    fullText.includes("deactivate") ||
+    fullText.includes("deactivated") ||
+    fullText.includes("suspend") ||
+    fullText.includes("banned") ||
+    fullText.includes("blocked") ||
+    fullText.includes("locked") ||
+    fullText.includes("hacked")
+  ) {
+    urgencyScore += 30;
+  }
   urgencyScore = Math.min(100, Math.max(10, urgencyScore));
 
   let recommendedPriority: TicketPriority = "MEDIUM";
