@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Ticket, TicketStatus } from "../models/Ticket.js";
 import { TicketComment } from "../models/TicketComment.js";
 import { EscalationLog } from "../models/EscalationLog.js";
+import { User } from "../models/User.js";
 import { requireAuth, AuthenticatedRequest } from "../middleware/auth.js";
 import { calculateSlaDeadline, checkAutoEscalationRules, evaluateSlaStatus } from "../services/sla.js";
 import { analyzeTicketWithAi } from "../services/ai.js";
@@ -107,7 +108,43 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response): 
       now: createdAt,
     });
 
-    const initialStatus = decision.shouldEscalate ? "ESCALATED" : "OPEN";
+    // AI Auto-Assignment Engine
+    // Query active support staff (AGENTs or ADMINs)
+    const activeStaff = await User.find({ role: { $in: ["AGENT", "ADMIN"] } }).lean();
+
+    let autoAssignedAgentId: any = null;
+    let autoAssignedAgentName = "";
+
+    if (activeStaff.length > 0) {
+      // Prioritize dedicated AGENTs first; fallback to ADMINs
+      const agentsOnly = activeStaff.filter((u) => u.role === "AGENT");
+      const candidates = agentsOnly.length > 0 ? agentsOnly : activeStaff;
+
+      // Smart Workload Balancing: query active ticket count for each staff member
+      const staffWorkloads = await Promise.all(
+        candidates.map(async (staffMember) => {
+          const load = await Ticket.countDocuments({
+            assignedTo: staffMember._id,
+            status: { $in: ["OPEN", "IN_PROGRESS", "ESCALATED"] },
+          });
+          return { staff: staffMember, load };
+        })
+      );
+
+      // Sort by workload ascending (least loaded agent first)
+      staffWorkloads.sort((a, b) => a.load - b.load);
+      const chosen = staffWorkloads[0].staff;
+      autoAssignedAgentId = chosen._id;
+      autoAssignedAgentName = chosen.name;
+    }
+
+    // Set initial status: ESCALATED if distress triggered, else IN_PROGRESS if auto-assigned, else OPEN
+    const initialStatus: TicketStatus = decision.shouldEscalate
+      ? "ESCALATED"
+      : autoAssignedAgentId
+      ? "IN_PROGRESS"
+      : "OPEN";
+
     const ticketNumber = `TC-${Math.floor(10000 + Math.random() * 90000)}`;
 
     const ticket = await Ticket.create({
@@ -118,12 +155,27 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response): 
       priority,
       status: initialStatus,
       customer: req.user!.userId,
+      assignedTo: autoAssignedAgentId,
       slaHours,
       slaDeadline: deadline,
       slaBreached: false,
-      aiAnalysis,
+      aiAnalysis: {
+        ...aiAnalysis,
+        autoAssigned: !!autoAssignedAgentId,
+        assignedAgentName: autoAssignedAgentName,
+      },
       tags: aiAnalysis.keyIssues || [],
     });
+
+    // Record internal audit note if auto-assigned
+    if (autoAssignedAgentId) {
+      await TicketComment.create({
+        ticket: ticket._id,
+        author: autoAssignedAgentId,
+        content: `🤖 [AI Auto-Assignment]: Automatically assigned to ${autoAssignedAgentName} (${category} domain, optimized via active queue workload balancing).`,
+        isInternal: true,
+      });
+    }
 
     if (decision.shouldEscalate) {
       await EscalationLog.create({
@@ -133,15 +185,22 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response): 
         fromStatus: "OPEN",
         toStatus: "ESCALATED",
         reason: decision.reason,
-        notes: `AI Sentiment: ${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}). Model: ${aiAnalysis.modelUsed}`,
+        notes: `AI Sentiment: ${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}). Model: ${aiAnalysis.modelUsed}. Assigned: ${autoAssignedAgentName || "None"}`,
       });
     }
 
     const populated = await Ticket.findById(ticket._id)
       .populate("customer", "name email role")
+      .populate("assignedTo", "name email role")
       .lean();
 
-    res.status(201).json({ message: "Ticket created", ticket: populated, autoEscalated: decision.shouldEscalate });
+    res.status(201).json({
+      message: "Ticket created",
+      ticket: populated,
+      autoEscalated: decision.shouldEscalate,
+      autoAssigned: !!autoAssignedAgentId,
+      assignedTo: autoAssignedAgentName,
+    });
   } catch (error) {
     console.error("Create ticket error:", error);
     res.status(500).json({ error: "Failed to create ticket" });

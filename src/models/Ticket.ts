@@ -14,6 +14,8 @@ export interface IAiAnalysis {
   escalationReason: string;
   suggestedReply: string;
   keyIssues: string[];
+  autoAssigned?: boolean;
+  assignedAgentName?: string;
   modelUsed: string;
   analyzedAt: Date;
 }
@@ -61,6 +63,8 @@ const AiAnalysisSchema = new Schema<IAiAnalysis>(
     escalationReason: { type: String, default: "" },
     suggestedReply: { type: String, default: "" },
     keyIssues: { type: [String], default: [] },
+    autoAssigned: { type: Boolean, default: false },
+    assignedAgentName: { type: String, default: "" },
     modelUsed: { type: String, default: "gemini-3.8-flash" },
     analyzedAt: { type: Date, default: Date.now },
   },
