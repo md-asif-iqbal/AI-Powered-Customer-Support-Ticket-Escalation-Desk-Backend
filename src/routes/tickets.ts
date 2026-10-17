@@ -454,6 +454,14 @@ router.post("/:id/comments", requireAuth, async (req: AuthenticatedRequest, res:
       return;
     }
 
+    // Prevent posting comments on resolved or closed tickets without reopening first
+    if (ticket.status === "RESOLVED" || ticket.status === "CLOSED") {
+      res.status(400).json({
+        error: "This ticket is marked as resolved. Please reopen the ticket before posting replies.",
+      });
+      return;
+    }
+
     // Role checks
     if (req.user?.role === "CUSTOMER") {
       if (ticket.customer.toString() !== req.user.userId) {
