@@ -36,7 +36,7 @@ app.use("/api/stats", statsRoutes);
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
-    service: "NT DeskAI Backend API",
+    service: "OmniDesk AI Backend API",
     models: {
       gemini: "gemini-3.8-flash",
       groq: "openai/gpt-oss-20b",
@@ -66,7 +66,7 @@ async function startServer() {
     }
 
     app.listen(PORT, () => {
-      console.log(`🚀 [Server] NT DeskAI Backend running at http://localhost:${PORT}`);
+      console.log(`🚀 [Server] OmniDesk AI Backend running at http://localhost:${PORT}`);
     });
   } catch (err) {
     console.error("Failed to start server:", err);
