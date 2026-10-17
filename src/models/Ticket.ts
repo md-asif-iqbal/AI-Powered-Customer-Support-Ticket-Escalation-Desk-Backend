@@ -16,6 +16,7 @@ export interface IAiAnalysis {
   keyIssues: string[];
   autoAssigned?: boolean;
   assignedAgentName?: string;
+  assignedAgentNames?: string[];
   modelUsed: string;
   analyzedAt: Date;
 }
@@ -29,6 +30,7 @@ export interface ITicket extends Document {
   status: TicketStatus;
   customer: Types.ObjectId;
   assignedTo?: Types.ObjectId | null;
+  assignedAgents?: Types.ObjectId[];
   slaHours: number;
   slaDeadline: Date;
   slaBreached: boolean;
@@ -65,6 +67,7 @@ const AiAnalysisSchema = new Schema<IAiAnalysis>(
     keyIssues: { type: [String], default: [] },
     autoAssigned: { type: Boolean, default: false },
     assignedAgentName: { type: String, default: "" },
+    assignedAgentNames: { type: [String], default: [] },
     modelUsed: { type: String, default: "gemini-3.8-flash" },
     analyzedAt: { type: Date, default: Date.now },
   },
@@ -119,6 +122,10 @@ const TicketSchema = new Schema<ITicket>(
       ref: "User",
       default: null,
       index: true,
+    },
+    assignedAgents: {
+      type: [{ type: Schema.Types.ObjectId, ref: "User" }],
+      default: [],
     },
     slaHours: {
       type: Number,

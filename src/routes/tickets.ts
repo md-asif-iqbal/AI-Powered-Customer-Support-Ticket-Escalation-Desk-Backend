@@ -20,6 +20,7 @@ const CreateTicketSchema = z.object({
 const UpdateStatusSchema = z.object({
   status: z.enum(["OPEN", "IN_PROGRESS", "ESCALATED", "RESOLVED", "CLOSED"]),
   assignedTo: z.string().optional().nullable(),
+  assignedAgents: z.array(z.string()).optional(),
   note: z.string().optional(),
 });
 
@@ -58,6 +59,7 @@ router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response): P
     const tickets = await Ticket.find(query)
       .populate("customer", "name email role")
       .populate("assignedTo", "name email role")
+      .populate("assignedAgents", "name email role")
       .sort({ createdAt: -1 })
       .lean();
 
@@ -108,34 +110,54 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response): 
       now: createdAt,
     });
 
-    // AI Auto-Assignment Engine
-    // Query active support staff (AGENTs or ADMINs)
+    // AI Priority-based & Multi-Agent Auto-Assignment Engine
+    // Query active support staff (AGENTs prioritized, fallback to ADMINs)
     const activeStaff = await User.find({ role: { $in: ["AGENT", "ADMIN"] } }).lean();
 
     let autoAssignedAgentId: any = null;
     let autoAssignedAgentName = "";
+    const assignedAgentIds: any[] = [];
+    const assignedAgentNames: string[] = [];
 
     if (activeStaff.length > 0) {
       // Prioritize dedicated AGENTs first; fallback to ADMINs
       const agentsOnly = activeStaff.filter((u) => u.role === "AGENT");
       const candidates = agentsOnly.length > 0 ? agentsOnly : activeStaff;
 
-      // Smart Workload Balancing: query active ticket count for each staff member
+      // Smart Workload & Capacity Balancing: count active tickets for each candidate
       const staffWorkloads = await Promise.all(
         candidates.map(async (staffMember) => {
           const load = await Ticket.countDocuments({
-            assignedTo: staffMember._id,
+            $or: [{ assignedTo: staffMember._id }, { assignedAgents: staffMember._id }],
             status: { $in: ["OPEN", "IN_PROGRESS", "ESCALATED"] },
           });
-          return { staff: staffMember, load };
+          return { staff: staffMember, load, isFree: load === 0 };
         })
       );
 
-      // Sort by workload ascending (least loaded agent first)
-      staffWorkloads.sort((a, b) => a.load - b.load);
-      const chosen = staffWorkloads[0].staff;
-      autoAssignedAgentId = chosen._id;
-      autoAssignedAgentName = chosen.name;
+      // Sort by availability: Free agents first (load === 0), then lowest load
+      staffWorkloads.sort((a, b) => {
+        if (a.isFree && !b.isFree) return -1;
+        if (!a.isFree && b.isFree) return 1;
+        return a.load - b.load;
+      });
+
+      // Primary Assignee (Lead)
+      const primary = staffWorkloads[0].staff;
+      autoAssignedAgentId = primary._id;
+      autoAssignedAgentName = primary.name;
+      assignedAgentIds.push(primary._id);
+      assignedAgentNames.push(`${primary.name} (Lead)`);
+
+      // Priority-based Multi-Agent Auto-Assignment:
+      // If ticket is URGENT or has critical customer distress (urgencyScore >= 75),
+      // assign a secondary collaborator (Co-Pilot) from available agents if available
+      const isUrgentOrCritical = priority === "URGENT" || aiAnalysis.urgencyScore >= 75;
+      if (isUrgentOrCritical && staffWorkloads.length > 1) {
+        const secondary = staffWorkloads[1].staff;
+        assignedAgentIds.push(secondary._id);
+        assignedAgentNames.push(`${secondary.name} (Co-Pilot)`);
+      }
     }
 
     // Set initial status: ESCALATED if distress triggered, else IN_PROGRESS if auto-assigned, else OPEN
@@ -156,24 +178,32 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response): 
       status: initialStatus,
       customer: req.user!.userId,
       assignedTo: autoAssignedAgentId,
+      assignedAgents: assignedAgentIds,
       slaHours,
       slaDeadline: deadline,
       slaBreached: false,
       aiAnalysis: {
         ...aiAnalysis,
-        autoAssigned: !!autoAssignedAgentId,
+        autoAssigned: assignedAgentIds.length > 0,
         assignedAgentName: autoAssignedAgentName,
+        assignedAgentNames,
       },
       tags: aiAnalysis.keyIssues || [],
     });
 
     // Record internal audit note if auto-assigned
-    if (autoAssignedAgentId) {
+    if (assignedAgentIds.length > 0) {
+      const isMulti = assignedAgentIds.length > 1;
+      const noteContent = isMulti
+        ? `🤖 [AI Priority Auto-Assignment]: High-urgency issue detected (${priority}, urgency score ${aiAnalysis.urgencyScore}/100). Auto-assigned multi-agent response team: ${assignedAgentNames.join(" & ")} for accelerated resolution.`
+        : `🤖 [AI Auto-Assignment]: Priority-routed to ${autoAssignedAgentName} (${category} queue, active workload capacity optimized).`;
+
       await TicketComment.create({
-        ticket: ticket._id,
+        ticketId: ticket._id,
         author: autoAssignedAgentId,
-        content: `🤖 [AI Auto-Assignment]: Automatically assigned to ${autoAssignedAgentName} (${category} domain, optimized via active queue workload balancing).`,
-        isInternal: true,
+        message: noteContent,
+        isInternalNote: true,
+        isAiGenerated: true,
       });
     }
 
@@ -185,25 +215,54 @@ router.post("/", requireAuth, async (req: AuthenticatedRequest, res: Response): 
         fromStatus: "OPEN",
         toStatus: "ESCALATED",
         reason: decision.reason,
-        notes: `AI Sentiment: ${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}). Model: ${aiAnalysis.modelUsed}. Assigned: ${autoAssignedAgentName || "None"}`,
+        notes: `AI Sentiment: ${aiAnalysis.sentiment} (${aiAnalysis.sentimentScore}). Model: ${aiAnalysis.modelUsed}. Assigned: ${assignedAgentNames.join(", ") || "None"}`,
       });
     }
 
     const populated = await Ticket.findById(ticket._id)
       .populate("customer", "name email role")
       .populate("assignedTo", "name email role")
+      .populate("assignedAgents", "name email role")
       .lean();
 
     res.status(201).json({
       message: "Ticket created",
       ticket: populated,
       autoEscalated: decision.shouldEscalate,
-      autoAssigned: !!autoAssignedAgentId,
+      autoAssigned: assignedAgentIds.length > 0,
       assignedTo: autoAssignedAgentName,
+      assignedAgents: assignedAgentNames,
     });
   } catch (error) {
     console.error("Create ticket error:", error);
     res.status(500).json({ error: "Failed to create ticket" });
+  }
+});
+
+// GET /api/tickets/agents/available (List support agents with real-time active load)
+router.get("/agents/available", requireAuth, async (_req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const staff = await User.find({ role: { $in: ["AGENT", "ADMIN"] } }).select("_id name email role").lean();
+    const withLoad = await Promise.all(
+      staff.map(async (u) => {
+        const activeTickets = await Ticket.countDocuments({
+          $or: [{ assignedTo: u._id }, { assignedAgents: u._id }],
+          status: { $in: ["OPEN", "IN_PROGRESS", "ESCALATED"] },
+        });
+        const availability = activeTickets === 0 ? "Free" : activeTickets <= 2 ? "Available" : "Busy";
+        return {
+          _id: u._id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          activeTickets,
+          availability,
+        };
+      })
+    );
+    res.json({ agents: withLoad });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch agents" });
   }
 });
 
@@ -214,6 +273,7 @@ router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
     const ticket = await Ticket.findById(id)
       .populate("customer", "name email role")
       .populate("assignedTo", "name email role")
+      .populate("assignedAgents", "name email role")
       .lean();
 
     if (!ticket) {
@@ -266,7 +326,7 @@ router.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Respons
       return;
     }
 
-    const { status: newStatus, assignedTo, note } = parseResult.data;
+    const { status: newStatus, assignedTo, assignedAgents, note } = parseResult.data;
     const oldStatus = ticket.status;
 
     if (req.user?.role === "CUSTOMER") {
@@ -283,6 +343,12 @@ router.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Respons
     ticket.status = newStatus as TicketStatus;
     if (assignedTo !== undefined) {
       ticket.assignedTo = assignedTo ? (assignedTo as unknown as typeof ticket.assignedTo) : undefined;
+    }
+    if (assignedAgents !== undefined) {
+      ticket.assignedAgents = assignedAgents as unknown as typeof ticket.assignedAgents;
+      if (assignedAgents.length > 0 && !ticket.assignedTo) {
+        ticket.assignedTo = assignedAgents[0] as unknown as typeof ticket.assignedTo;
+      }
     }
 
     if (newStatus === "RESOLVED" && !ticket.resolvedAt) ticket.resolvedAt = new Date();
@@ -308,6 +374,7 @@ router.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Respons
     const updated = await Ticket.findById(id)
       .populate("customer", "name email role")
       .populate("assignedTo", "name email role")
+      .populate("assignedAgents", "name email role")
       .lean();
 
     res.json({ message: "Ticket updated", ticket: updated });

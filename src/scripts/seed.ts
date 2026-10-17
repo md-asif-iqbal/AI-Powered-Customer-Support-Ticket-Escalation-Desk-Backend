@@ -33,7 +33,31 @@ export async function runSeed() {
     { upsert: true, new: true }
   );
 
-  await User.findOneAndUpdate(
+  const agentMarcus = await User.findOneAndUpdate(
+    { email: "marcus.agent@demo.com" },
+    {
+      name: "Marcus Vance",
+      email: "marcus.agent@demo.com",
+      passwordHash: demoPasswordHash,
+      role: "AGENT",
+      authProvider: "LOCAL",
+    },
+    { upsert: true, new: true }
+  );
+
+  const agentPriya = await User.findOneAndUpdate(
+    { email: "priya.agent@demo.com" },
+    {
+      name: "Priya Sharma",
+      email: "priya.agent@demo.com",
+      passwordHash: demoPasswordHash,
+      role: "AGENT",
+      authProvider: "LOCAL",
+    },
+    { upsert: true, new: true }
+  );
+
+  const admin = await User.findOneAndUpdate(
     { email: "admin@demo.com" },
     {
       name: "Alex Admin",
@@ -51,7 +75,7 @@ export async function runSeed() {
 
   const now = new Date();
 
-  // 1. Escalated Billing Outage (Auto-Escalated by AI)
+  // 1. Escalated Billing Outage (Multi-Agent Auto-Assigned by AI)
   const t1Title = "URGENT: Payment gateway double charged client and checkout crashed";
   const t1Desc =
     "This is completely unacceptable. Our checkout threw error 500 and double charged our customer credit card. Refund now and fix immediately!";
@@ -68,10 +92,16 @@ export async function runSeed() {
     status: "ESCALATED",
     customer: customer._id,
     assignedTo: agent._id,
+    assignedAgents: [agent._id, agentMarcus._id],
     slaHours: t1Sla.slaHours,
     slaDeadline: t1Sla.deadline,
     slaBreached: false,
-    aiAnalysis: t1Ai,
+    aiAnalysis: {
+      ...t1Ai,
+      autoAssigned: true,
+      assignedAgentName: "Sarah Agent",
+      assignedAgentNames: ["Sarah Agent (Lead)", "Marcus Vance (Co-Pilot)"],
+    },
     tags: ["billing", "crash", "payment", "urgent"],
     createdAt: t1Created,
   });
@@ -83,19 +113,27 @@ export async function runSeed() {
     fromStatus: "OPEN",
     toStatus: "ESCALATED",
     reason: "High customer distress detected by AI sentiment analyzer (Score: -0.85). Priority set to URGENT.",
-    notes: "Auto-escalated at ticket inception.",
+    notes: "Auto-escalated at ticket inception. Dual-agent assigned.",
     createdAt: t1Created,
   });
 
   await TicketComment.create({
     ticketId: ticket1._id,
     author: agent._id,
-    message: "Investigating gateway server logs. Payment provider confirmed transient webhook latency spike.",
+    message: "🤖 [AI Priority Auto-Assignment]: High-urgency issue detected. Assigned multi-agent team: Sarah Agent (Lead) & Marcus Vance (Co-Pilot) for rapid resolution.",
+    isInternalNote: true,
+    createdAt: t1Created,
+  });
+
+  await TicketComment.create({
+    ticketId: ticket1._id,
+    author: agent._id,
+    message: "Investigating gateway server logs. Payment provider confirmed transient webhook latency spike. Reversal initiated.",
     isInternalNote: false,
     createdAt: new Date(t1Created.getTime() + 20 * 60 * 1000),
   });
 
-  // 2. High Priority In Progress
+  // 2. High Priority In Progress (Assigned to Marcus Vance)
   const t2Title = "REST API Webhooks returning 504 Gateway Timeout intermittently";
   const t2Desc =
     "During peak afternoon volume, webhook dispatches fail with 504. Please check if connection pool is saturated.";
@@ -111,11 +149,17 @@ export async function runSeed() {
     priority: "HIGH",
     status: "IN_PROGRESS",
     customer: customer._id,
-    assignedTo: agent._id,
+    assignedTo: agentMarcus._id,
+    assignedAgents: [agentMarcus._id],
     slaHours: t2Sla.slaHours,
     slaDeadline: t2Sla.deadline,
     slaBreached: false,
-    aiAnalysis: t2Ai,
+    aiAnalysis: {
+      ...t2Ai,
+      autoAssigned: true,
+      assignedAgentName: "Marcus Vance",
+      assignedAgentNames: ["Marcus Vance (Lead)"],
+    },
     tags: ["api", "latency", "timeout"],
     createdAt: t2Created,
   });
@@ -136,6 +180,7 @@ export async function runSeed() {
     status: "ESCALATED",
     customer: customer._id,
     assignedTo: undefined,
+    assignedAgents: [],
     slaHours: t3Sla.slaHours,
     slaDeadline: t3Sla.deadline,
     slaBreached: true,
@@ -154,13 +199,13 @@ export async function runSeed() {
     createdAt: t3Sla.deadline,
   });
 
-  // 4. Resolved Ticket
+  // 4. Resolved Ticket (Sarah Agent)
   const t4Title = "Assistance setting up SSO and SAML 2.0 with Okta";
   const t4Desc = "Please share the ACS URL and Entity ID metadata XML for our enterprise Okta tenant.";
   const t4Ai = analyzeTicketHeuristically({ title: t4Title, description: t4Desc });
   const t4Created = new Date(now.getTime() - 20 * 60 * 60 * 1000);
   const t4Sla = calculateSlaDeadline(t4Created, "LOW");
-  const t4Resolved = new Date(now.getTime() - 8 * 60 * 60 * 1000);
+  const t4Resolved = new Date(now.getTime() - 18 * 60 * 60 * 1000);
 
   await Ticket.create({
     ticketNumber: "TC-62019",
@@ -171,6 +216,7 @@ export async function runSeed() {
     status: "RESOLVED",
     customer: customer._id,
     assignedTo: agent._id,
+    assignedAgents: [agent._id],
     slaHours: t4Sla.slaHours,
     slaDeadline: t4Sla.deadline,
     slaBreached: false,
@@ -180,12 +226,164 @@ export async function runSeed() {
     createdAt: t4Created,
   });
 
+  // 5. Resolved Ticket (Sarah Agent - Billing inquiry resolved in 1.4h)
+  const t5Created = new Date(now.getTime() - 40 * 60 * 60 * 1000);
+  const t5Sla = calculateSlaDeadline(t5Created, "MEDIUM");
+  await Ticket.create({
+    ticketNumber: "TC-55102",
+    title: "Need updated invoice with VAT registration certificate number",
+    description: "Our accounts department requires the official invoice receipt with tax registration number for March.",
+    category: "BILLING",
+    priority: "MEDIUM",
+    status: "RESOLVED",
+    customer: customer._id,
+    assignedTo: agent._id,
+    assignedAgents: [agent._id],
+    slaHours: t5Sla.slaHours,
+    slaDeadline: t5Sla.deadline,
+    slaBreached: false,
+    resolvedAt: new Date(t5Created.getTime() + 85 * 60 * 1000), // 1.4h
+    aiAnalysis: {
+      sentiment: "POSITIVE",
+      sentimentScore: 0.8,
+      urgencyScore: 25,
+      recommendedCategory: "BILLING",
+      recommendedPriority: "MEDIUM",
+      autoEscalateRecommended: false,
+      escalationReason: "",
+      suggestedReply: "Here is your updated corporate invoice attached.",
+      keyIssues: ["invoice", "vat", "receipt"],
+      modelUsed: "gemini-3.8-flash",
+      analyzedAt: t5Created,
+    },
+    tags: ["invoice", "vat"],
+    createdAt: t5Created,
+  });
+
+  // 6. Resolved Ticket (Marcus Vance - Technical Bug resolved in 2.2h)
+  const t6Created = new Date(now.getTime() - 50 * 60 * 60 * 1000);
+  const t6Sla = calculateSlaDeadline(t6Created, "HIGH");
+  await Ticket.create({
+    ticketNumber: "TC-48219",
+    title: "SSL Certificate renewal caused handshake rejection on legacy client",
+    description: "Older cURL clients are failing handshake after the new TLS certificate was deployed yesterday.",
+    category: "TECHNICAL",
+    priority: "HIGH",
+    status: "RESOLVED",
+    customer: customer._id,
+    assignedTo: agentMarcus._id,
+    assignedAgents: [agentMarcus._id],
+    slaHours: t6Sla.slaHours,
+    slaDeadline: t6Sla.deadline,
+    slaBreached: false,
+    resolvedAt: new Date(t6Created.getTime() + 130 * 60 * 1000), // 2.1h
+    aiAnalysis: {
+      sentiment: "NEUTRAL",
+      sentimentScore: 0.2,
+      urgencyScore: 60,
+      recommendedCategory: "TECHNICAL",
+      recommendedPriority: "HIGH",
+      autoEscalateRecommended: false,
+      escalationReason: "",
+      suggestedReply: "Legacy cipher suite compatibility enabled on load balancer.",
+      keyIssues: ["ssl", "tls", "handshake"],
+      modelUsed: "gemini-3.8-flash",
+      analyzedAt: t6Created,
+    },
+    tags: ["ssl", "tls"],
+    createdAt: t6Created,
+  });
+
+  // 7. Resolved Ticket (Priya Sharma - Customer Query resolved in 45m)
+  const t7Created = new Date(now.getTime() - 30 * 60 * 60 * 1000);
+  const t7Sla = calculateSlaDeadline(t7Created, "LOW");
+  await Ticket.create({
+    ticketNumber: "TC-39108",
+    title: "How to export complete customer activity history report in CSV format",
+    description: "We want to export the past 6 months audit trail into Excel or CSV for compliance analysis.",
+    category: "GENERAL",
+    priority: "LOW",
+    status: "RESOLVED",
+    customer: customer._id,
+    assignedTo: agentPriya._id,
+    assignedAgents: [agentPriya._id],
+    slaHours: t7Sla.slaHours,
+    slaDeadline: t7Sla.deadline,
+    slaBreached: false,
+    resolvedAt: new Date(t7Created.getTime() + 45 * 60 * 1000), // 0.75h
+    aiAnalysis: {
+      sentiment: "POSITIVE",
+      sentimentScore: 0.9,
+      urgencyScore: 15,
+      recommendedCategory: "GENERAL",
+      recommendedPriority: "LOW",
+      autoEscalateRecommended: false,
+      escalationReason: "",
+      suggestedReply: "Navigate to Settings -> Audit Export to download your CSV file.",
+      keyIssues: ["export", "csv", "audit"],
+      modelUsed: "gemini-3.8-flash",
+      analyzedAt: t7Created,
+    },
+    tags: ["export", "csv"],
+    createdAt: t7Created,
+  });
+
+  // 8. Resolved Ticket (Alex Admin - Critical DNS resolution in 35m)
+  const t8Created = new Date(now.getTime() - 72 * 60 * 60 * 1000);
+  const t8Sla = calculateSlaDeadline(t8Created, "URGENT");
+  await Ticket.create({
+    ticketNumber: "TC-29184",
+    title: "Apex domain DNS propagation stall during Cloudflare migration",
+    description: "CNAME flattening record not resolving in Southeast Asia region after DNS nameserver update.",
+    category: "TECHNICAL",
+    priority: "URGENT",
+    status: "RESOLVED",
+    customer: customer._id,
+    assignedTo: admin._id,
+    assignedAgents: [admin._id],
+    slaHours: t8Sla.slaHours,
+    slaDeadline: t8Sla.deadline,
+    slaBreached: false,
+    resolvedAt: new Date(t8Created.getTime() + 35 * 60 * 1000), // 0.6h
+    aiAnalysis: {
+      sentiment: "POSITIVE",
+      sentimentScore: 0.85,
+      urgencyScore: 80,
+      recommendedCategory: "TECHNICAL",
+      recommendedPriority: "URGENT",
+      autoEscalateRecommended: false,
+      escalationReason: "",
+      suggestedReply: "Cloudflare nameserver glue records refreshed.",
+      keyIssues: ["dns", "cloudflare", "cname"],
+      modelUsed: "gemini-3.8-flash",
+      analyzedAt: t8Created,
+    },
+    tags: ["dns", "cloudflare"],
+    createdAt: t8Created,
+  });
+
   return {
-    message: "MongoDB Atlas seeded with demo users and realistic tickets",
+    message: "MongoDB Atlas seeded with multi-agent support team & realistic service data!",
     credentials: {
       customer: { email: "customer@demo.com", password: "password123" },
-      agent: { email: "agent@demo.com", password: "password123" },
-      admin: { email: "admin@demo.com", password: "password123" },
+      agentSarah: { email: "agent@demo.com", password: "password123" },
+      agentMarcus: { email: "marcus.agent@demo.com", password: "password123" },
+      agentPriya: { email: "priya.agent@demo.com", password: "password123" },
+      adminAlex: { email: "admin@demo.com", password: "password123" },
     },
   };
 }
+
+// Allow direct CLI execution: tsx src/scripts/seed.ts
+if (process.argv[1] && process.argv[1].includes("seed")) {
+  import("../config/db.js").then(async ({ connectDB }) => {
+    import("dotenv").then(async (dotenv) => {
+      dotenv.config();
+      await connectDB();
+      const res = await runSeed();
+      console.log("[Seed Finished]:", res);
+      process.exit(0);
+    });
+  });
+}
+
