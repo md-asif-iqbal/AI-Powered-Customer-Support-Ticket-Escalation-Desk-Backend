@@ -1,4 +1,5 @@
 import { Router, Response } from "express";
+import mongoose from "mongoose";
 import { z } from "zod";
 import { Ticket, TicketStatus } from "../models/Ticket.js";
 import { TicketComment } from "../models/TicketComment.js";
@@ -10,6 +11,13 @@ import { analyzeTicketWithAi } from "../services/ai.js";
 import { checkAndReassignInactiveTickets } from "../services/inactivityService.js";
 
 const router = Router();
+
+function findTicketDoc(id: string) {
+  if (mongoose.isValidObjectId(id)) {
+    return Ticket.findById(id);
+  }
+  return Ticket.findOne({ ticketNumber: id });
+}
 
 const CreateTicketSchema = z.object({
   title: z.string().min(5).max(150),
@@ -295,7 +303,7 @@ router.get("/agents/available", requireAuth, async (_req: AuthenticatedRequest, 
 router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const ticket = await Ticket.findById(id)
+    const ticket = await findTicketDoc(id)
       .populate("customer", "name email role")
       .populate("assignedTo", "name email role")
       .populate("assignedAgents", "name email role")
@@ -312,11 +320,11 @@ router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
     }
 
     const [comments, escalationLogs] = await Promise.all([
-      TicketComment.find({ ticketId: id })
+      TicketComment.find({ ticketId: ticket._id })
         .populate("author", "name email role")
         .sort({ createdAt: 1 })
         .lean(),
-      EscalationLog.find({ ticketId: id })
+      EscalationLog.find({ ticketId: ticket._id })
         .populate("triggeredBy", "name email role")
         .sort({ createdAt: -1 })
         .lean(),
@@ -339,7 +347,7 @@ router.get("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response)
 router.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const ticket = await Ticket.findById(id);
+    const ticket = await findTicketDoc(id);
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
@@ -424,7 +432,7 @@ router.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Respons
       });
     }
 
-    const updated = await Ticket.findById(id)
+    const updated = await Ticket.findById(ticket._id)
       .populate("customer", "name email role")
       .populate("assignedTo", "name email role")
       .populate("assignedAgents", "name email role")
@@ -440,7 +448,7 @@ router.patch("/:id", requireAuth, async (req: AuthenticatedRequest, res: Respons
 router.post("/:id/comments", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const ticket = await Ticket.findById(id);
+    const ticket = await findTicketDoc(id);
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
@@ -528,7 +536,7 @@ router.post("/:id/comments", requireAuth, async (req: AuthenticatedRequest, res:
 router.post("/:id/escalate", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const ticket = await Ticket.findById(id);
+    const ticket = await findTicketDoc(id);
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
@@ -602,7 +610,7 @@ router.post("/:id/escalate", requireAuth, async (req: AuthenticatedRequest, res:
 router.post("/:id/ai-analyze", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const ticket = await Ticket.findById(id);
+    const ticket = await findTicketDoc(id);
     if (!ticket) {
       res.status(404).json({ error: "Ticket not found" });
       return;
@@ -624,6 +632,92 @@ router.post("/:id/ai-analyze", requireAuth, async (req: AuthenticatedRequest, re
   }
 });
 
+const FeedbackSchema = z.object({
+  rating: z.number().min(1).max(5),
+  comment: z.string().optional().default(""),
+  isReported: z.boolean().optional().default(false),
+  reportReason: z.string().optional().default(""),
+});
+
+// POST /api/tickets/:id/feedback (Customer rates agent or reports service misconduct)
+router.post("/:id/feedback", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const ticket = await findTicketDoc(id);
+    if (!ticket) {
+      res.status(404).json({ error: "Ticket not found" });
+      return;
+    }
+
+    // Role check: Only customer owner can submit review or report
+    if (req.user?.role !== "CUSTOMER" || ticket.customer.toString() !== req.user.userId) {
+      res.status(403).json({
+        error: "Forbidden: Only the customer who raised this ticket can submit feedback or reports.",
+      });
+      return;
+    }
+
+    const parseResult = FeedbackSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      res.status(400).json({ error: "Validation failed", details: parseResult.error.flatten() });
+      return;
+    }
+
+    const { rating, comment, isReported, reportReason } = parseResult.data;
+
+    ticket.customerFeedback = {
+      rating,
+      comment: comment || "",
+      isReported: Boolean(isReported),
+      reportReason: reportReason || "",
+      submittedAt: new Date(),
+    };
+
+    await ticket.save();
+
+    // Log event in conversation and audit trail
+    if (isReported) {
+      await TicketComment.create({
+        ticketId: ticket._id,
+        author: req.user.userId,
+        message: `🚩 [Customer Incident Report]: Customer reported assigned agent misconduct. Reason: "${reportReason || "Poor service"}". Rating: ${rating}/5 Stars.`,
+        isInternalNote: true,
+      });
+
+      await EscalationLog.create({
+        ticketId: ticket._id,
+        triggeredBy: req.user.userId as any,
+        triggerType: "CUSTOMER_REPORT",
+        fromStatus: ticket.status,
+        toStatus: ticket.status,
+        reason: `Customer Report Filed: ${reportReason || "Service quality issue"}`,
+        notes: `Customer Rating: ${rating}/5. Feedback: "${comment || "N/A"}"`,
+      });
+    } else {
+      await TicketComment.create({
+        ticketId: ticket._id,
+        author: req.user.userId,
+        message: `⭐ [Customer Review]: Customer rated agent service ${rating}/5 stars.${comment ? ` Review: "${comment}"` : ""}`,
+        isInternalNote: false,
+      });
+    }
+
+    const populated = await Ticket.findById(ticket._id)
+      .populate("customer", "name email role")
+      .populate("assignedTo", "name email role")
+      .populate("assignedAgents", "name email role")
+      .lean();
+
+    res.json({
+      message: isReported ? "Report submitted to admin audit" : "Review submitted successfully",
+      ticket: populated,
+    });
+  } catch (error) {
+    console.error("Submit feedback error:", error);
+    res.status(500).json({ error: "Failed to submit customer feedback" });
+  }
+});
+
 // POST /api/tickets/check-inactivity (Trigger AI inactivity auto-switch check)
 router.post("/check-inactivity", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
@@ -640,3 +734,4 @@ router.post("/check-inactivity", requireAuth, async (req: AuthenticatedRequest, 
 });
 
 export default router;
+

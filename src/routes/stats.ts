@@ -71,6 +71,9 @@ router.get("/leaderboard", requireAuth, async (_req: AuthenticatedRequest, res: 
         let breachedCount = 0;
         let totalResolutionTimeHours = 0;
         let positiveSentimentCount = 0;
+        const ratings: number[] = [];
+        let reportsCount = 0;
+        const customerReviews: { rating: number; comment: string; submittedAt: Date; ticketNumber: string }[] = [];
 
         for (const t of tickets) {
           const isResolved = t.status === "RESOLVED" || t.status === "CLOSED";
@@ -87,12 +90,34 @@ router.get("/leaderboard", requireAuth, async (_req: AuthenticatedRequest, res: 
             activeTickets++;
           }
 
+          if (t.customerFeedback?.rating) {
+            ratings.push(t.customerFeedback.rating);
+            if (t.customerFeedback.comment) {
+              customerReviews.push({
+                rating: t.customerFeedback.rating,
+                comment: t.customerFeedback.comment,
+                submittedAt: t.customerFeedback.submittedAt || (t as any).updatedAt,
+                ticketNumber: t.ticketNumber,
+              });
+            }
+          }
+
+          if (t.customerFeedback?.isReported) {
+            reportsCount++;
+          }
+
           // SLA Breach check
           const checkDate = isResolved && t.resolvedAt ? new Date(t.resolvedAt) : now;
           if (checkDate.getTime() > new Date(t.slaDeadline).getTime() || t.slaBreached) {
             breachedCount++;
           }
         }
+
+        const reviewCount = ratings.length;
+        const avgRating =
+          reviewCount > 0
+            ? Number((ratings.reduce((acc, curr) => acc + curr, 0) / reviewCount).toFixed(1))
+            : 4.8; // default baseline for unreviewed
 
         const slaComplianceRate =
           ticketsResolved > 0
@@ -113,18 +138,23 @@ router.get("/leaderboard", requireAuth, async (_req: AuthenticatedRequest, res: 
         const availability = activeTickets === 0 ? "Free" : activeTickets <= 2 ? "Available" : "Busy";
 
         // AI Composite Performance Score (0-100)
-        // Weighted formula:
-        // - Volume points: up to 45 pts
-        // - SLA compliance: up to 30 pts
-        // - Customer satisfaction: up to 25 pts
+        // Weighted formula factoring in all operational metrics:
+        // - Volume points: up to 35 pts
+        // - SLA compliance: up to 25 pts
+        // - Customer Star Rating: up to 25 pts (avgRating / 5 * 25)
+        // - Customer Sentiment / CSAT: up to 15 pts
+        // - Customer Report Penalty: -15 pts per incident report filed against the agent!
         // - Backlog penalty if activeTickets > 3: -3 pts each
-        const volumePts = Math.min(45, ticketsResolved * 7 + (agent.role === "AGENT" ? 15 : 10));
-        const slaPts = (slaComplianceRate / 100) * 30;
-        const csatPts = (customerSatisfaction / 100) * 25;
+        const volumePts = Math.min(35, ticketsResolved * 7 + (agent.role === "AGENT" ? 14 : 7));
+        const slaPts = (slaComplianceRate / 100) * 25;
+        const ratingPts = (avgRating / 5) * 25;
+        const csatPts = (customerSatisfaction / 100) * 15;
+        const reportPenalty = reportsCount * 15;
         const backlogPenalty = activeTickets > 3 ? (activeTickets - 3) * 3 : 0;
+
         const aiPerformanceScore = Math.max(
-          40,
-          Math.min(100, Math.round(volumePts + slaPts + csatPts - backlogPenalty))
+          30,
+          Math.min(100, Math.round(volumePts + slaPts + ratingPts + csatPts - reportPenalty - backlogPenalty))
         );
 
         return {
@@ -138,6 +168,10 @@ router.get("/leaderboard", requireAuth, async (_req: AuthenticatedRequest, res: 
           slaComplianceRate: Math.max(0, Math.min(100, slaComplianceRate)),
           avgResolutionTimeHours,
           customerSatisfaction: Math.max(70, Math.min(100, customerSatisfaction)),
+          avgRating,
+          reviewCount,
+          reportsCount,
+          recentReviews: customerReviews.slice(0, 3),
           aiPerformanceScore,
           availability,
         };

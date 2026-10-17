@@ -21,6 +21,42 @@ export async function runSeed() {
     { upsert: true, new: true }
   );
 
+  const customerEmma = await User.findOneAndUpdate(
+    { email: "emma.customer@demo.com" },
+    {
+      name: "Emma Watson",
+      email: "emma.customer@demo.com",
+      passwordHash: demoPasswordHash,
+      role: "CUSTOMER",
+      authProvider: "LOCAL",
+    },
+    { upsert: true, new: true }
+  );
+
+  const customerDavid = await User.findOneAndUpdate(
+    { email: "david.customer@demo.com" },
+    {
+      name: "David Miller",
+      email: "david.customer@demo.com",
+      passwordHash: demoPasswordHash,
+      role: "CUSTOMER",
+      authProvider: "LOCAL",
+    },
+    { upsert: true, new: true }
+  );
+
+  const customerSophia = await User.findOneAndUpdate(
+    { email: "sophia.customer@demo.com" },
+    {
+      name: "Sophia Chen",
+      email: "sophia.customer@demo.com",
+      passwordHash: demoPasswordHash,
+      role: "CUSTOMER",
+      authProvider: "LOCAL",
+    },
+    { upsert: true, new: true }
+  );
+
   const agent = await User.findOneAndUpdate(
     { email: "agent@demo.com" },
     {
@@ -133,7 +169,7 @@ export async function runSeed() {
     createdAt: new Date(t1Created.getTime() + 20 * 60 * 1000),
   });
 
-  // 2. High Priority In Progress (Assigned to Marcus Vance)
+  // 2. High Priority In Progress (Emma Watson - Assigned to Marcus Vance)
   const t2Title = "REST API Webhooks returning 504 Gateway Timeout intermittently";
   const t2Desc =
     "During peak afternoon volume, webhook dispatches fail with 504. Please check if connection pool is saturated.";
@@ -148,7 +184,7 @@ export async function runSeed() {
     category: "TECHNICAL",
     priority: "HIGH",
     status: "IN_PROGRESS",
-    customer: customer._id,
+    customer: customerEmma._id,
     assignedTo: agentMarcus._id,
     assignedAgents: [agentMarcus._id],
     slaHours: t2Sla.slaHours,
@@ -164,7 +200,7 @@ export async function runSeed() {
     createdAt: t2Created,
   });
 
-  // 3. Breached Ticket
+  // 3. Breached Ticket (David Miller)
   const t3Title = "Database replica lag causing stale reports on dashboard";
   const t3Desc = "Reports generated at midnight display data from 2 days ago. Please check replica synchronization.";
   const t3Ai = analyzeTicketHeuristically({ title: t3Title, description: t3Desc });
@@ -178,7 +214,7 @@ export async function runSeed() {
     category: "TECHNICAL",
     priority: "MEDIUM",
     status: "ESCALATED",
-    customer: customer._id,
+    customer: customerDavid._id,
     assignedTo: undefined,
     assignedAgents: [],
     slaHours: t3Sla.slaHours,
@@ -199,7 +235,7 @@ export async function runSeed() {
     createdAt: t3Sla.deadline,
   });
 
-  // 4. Resolved Ticket (Sarah Agent)
+  // 4. Resolved Ticket (Emma Watson - Sarah Agent)
   const t4Title = "Assistance setting up SSO and SAML 2.0 with Okta";
   const t4Desc = "Please share the ACS URL and Entity ID metadata XML for our enterprise Okta tenant.";
   const t4Ai = analyzeTicketHeuristically({ title: t4Title, description: t4Desc });
@@ -214,19 +250,25 @@ export async function runSeed() {
     category: "ACCOUNT",
     priority: "LOW",
     status: "RESOLVED",
-    customer: customer._id,
+    customer: customerEmma._id,
     assignedTo: agent._id,
     assignedAgents: [agent._id],
     slaHours: t4Sla.slaHours,
     slaDeadline: t4Sla.deadline,
     slaBreached: false,
     resolvedAt: t4Resolved,
+    customerFeedback: {
+      rating: 5,
+      comment: "Sarah provided the metadata certificate and walked us through the Okta SAML connector seamlessly!",
+      isReported: false,
+      submittedAt: new Date(t4Resolved.getTime() + 15 * 60 * 1000),
+    },
     aiAnalysis: t4Ai,
     tags: ["sso", "saml", "okta"],
     createdAt: t4Created,
   });
 
-  // 5. Resolved Ticket (Sarah Agent - Billing inquiry resolved in 1.4h)
+  // 5. Resolved Ticket (John Customer - Sarah Agent - Billing inquiry resolved in 1.4h)
   const t5Created = new Date(now.getTime() - 40 * 60 * 60 * 1000);
   const t5Sla = calculateSlaDeadline(t5Created, "MEDIUM");
   await Ticket.create({
@@ -243,6 +285,12 @@ export async function runSeed() {
     slaDeadline: t5Sla.deadline,
     slaBreached: false,
     resolvedAt: new Date(t5Created.getTime() + 85 * 60 * 1000), // 1.4h
+    customerFeedback: {
+      rating: 5,
+      comment: "Updated VAT invoice was delivered in under 2 hours. Excellent speed and courtesy!",
+      isReported: false,
+      submittedAt: new Date(t5Created.getTime() + 95 * 60 * 1000),
+    },
     aiAnalysis: {
       sentiment: "POSITIVE",
       sentimentScore: 0.8,
@@ -260,7 +308,7 @@ export async function runSeed() {
     createdAt: t5Created,
   });
 
-  // 6. Resolved Ticket (Marcus Vance - Technical Bug resolved in 2.2h)
+  // 6. Resolved Ticket (David Miller - Marcus Vance - Technical Bug resolved in 2.2h)
   const t6Created = new Date(now.getTime() - 50 * 60 * 60 * 1000);
   const t6Sla = calculateSlaDeadline(t6Created, "HIGH");
   await Ticket.create({
@@ -270,13 +318,19 @@ export async function runSeed() {
     category: "TECHNICAL",
     priority: "HIGH",
     status: "RESOLVED",
-    customer: customer._id,
+    customer: customerDavid._id,
     assignedTo: agentMarcus._id,
     assignedAgents: [agentMarcus._id],
     slaHours: t6Sla.slaHours,
     slaDeadline: t6Sla.deadline,
     slaBreached: false,
     resolvedAt: new Date(t6Created.getTime() + 130 * 60 * 1000), // 2.1h
+    customerFeedback: {
+      rating: 4,
+      comment: "Marcus reconfigured the cipher fallback promptly and helped test our legacy staging servers.",
+      isReported: false,
+      submittedAt: new Date(t6Created.getTime() + 140 * 60 * 1000),
+    },
     aiAnalysis: {
       sentiment: "NEUTRAL",
       sentimentScore: 0.2,
@@ -294,7 +348,7 @@ export async function runSeed() {
     createdAt: t6Created,
   });
 
-  // 7. Resolved Ticket (Priya Sharma - Customer Query resolved in 45m)
+  // 7. Resolved Ticket (Sophia Chen - Priya Sharma - Customer Query resolved in 45m)
   const t7Created = new Date(now.getTime() - 30 * 60 * 60 * 1000);
   const t7Sla = calculateSlaDeadline(t7Created, "LOW");
   await Ticket.create({
@@ -304,13 +358,19 @@ export async function runSeed() {
     category: "GENERAL",
     priority: "LOW",
     status: "RESOLVED",
-    customer: customer._id,
+    customer: customerSophia._id,
     assignedTo: agentPriya._id,
     assignedAgents: [agentPriya._id],
     slaHours: t7Sla.slaHours,
     slaDeadline: t7Sla.deadline,
     slaBreached: false,
     resolvedAt: new Date(t7Created.getTime() + 45 * 60 * 1000), // 0.75h
+    customerFeedback: {
+      rating: 5,
+      comment: "Very swift response and crystal clear guidance. CSV was downloaded in seconds!",
+      isReported: false,
+      submittedAt: new Date(t7Created.getTime() + 50 * 60 * 1000),
+    },
     aiAnalysis: {
       sentiment: "POSITIVE",
       sentimentScore: 0.9,
@@ -328,7 +388,7 @@ export async function runSeed() {
     createdAt: t7Created,
   });
 
-  // 8. Resolved Ticket (Alex Admin - Critical DNS resolution in 35m)
+  // 8. Resolved Ticket (Sophia Chen - Alex Admin - Critical DNS resolution in 35m)
   const t8Created = new Date(now.getTime() - 72 * 60 * 60 * 1000);
   const t8Sla = calculateSlaDeadline(t8Created, "URGENT");
   await Ticket.create({
@@ -338,13 +398,19 @@ export async function runSeed() {
     category: "TECHNICAL",
     priority: "URGENT",
     status: "RESOLVED",
-    customer: customer._id,
+    customer: customerSophia._id,
     assignedTo: admin._id,
     assignedAgents: [admin._id],
     slaHours: t8Sla.slaHours,
     slaDeadline: t8Sla.deadline,
     slaBreached: false,
     resolvedAt: new Date(t8Created.getTime() + 35 * 60 * 1000), // 0.6h
+    customerFeedback: {
+      rating: 5,
+      comment: "Exceptional emergency assistance. Admin Alex resolved our DNS stall under 40 minutes.",
+      isReported: false,
+      submittedAt: new Date(t8Created.getTime() + 40 * 60 * 1000),
+    },
     aiAnalysis: {
       sentiment: "POSITIVE",
       sentimentScore: 0.85,

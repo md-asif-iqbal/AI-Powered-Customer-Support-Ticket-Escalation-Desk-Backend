@@ -6,7 +6,8 @@ export type EscalationTriggerType =
   | "AI_SENTIMENT"
   | "SLA_BREACH"
   | "SYSTEM_RULE"
-  | "AGENT_INACTIVITY";
+  | "AGENT_INACTIVITY"
+  | "CUSTOMER_REPORT";
 
 export interface IEscalationLog extends Document {
   ticketId: Types.ObjectId;
@@ -34,7 +35,14 @@ const EscalationLogSchema = new Schema<IEscalationLog>(
     },
     triggerType: {
       type: String,
-      enum: ["MANUAL", "AI_SENTIMENT", "SLA_BREACH", "SYSTEM_RULE", "AGENT_INACTIVITY"],
+      enum: [
+        "MANUAL",
+        "AI_SENTIMENT",
+        "SLA_BREACH",
+        "SYSTEM_RULE",
+        "AGENT_INACTIVITY",
+        "CUSTOMER_REPORT",
+      ],
       required: true,
       index: true,
     },

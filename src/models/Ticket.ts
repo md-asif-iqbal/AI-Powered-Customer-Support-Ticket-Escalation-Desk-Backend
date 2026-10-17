@@ -21,6 +21,14 @@ export interface IAiAnalysis {
   analyzedAt: Date;
 }
 
+export interface ICustomerFeedback {
+  rating: number; // 1-5
+  comment?: string;
+  isReported?: boolean;
+  reportReason?: string;
+  submittedAt: Date;
+}
+
 export interface ITicket extends Document {
   ticketNumber: string;
   title: string;
@@ -42,6 +50,7 @@ export interface ITicket extends Document {
   closedAt?: Date | null;
   tags: string[];
   aiAnalysis?: IAiAnalysis;
+  customerFeedback?: ICustomerFeedback;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -179,6 +188,13 @@ const TicketSchema = new Schema<ITicket>(
     aiAnalysis: {
       type: AiAnalysisSchema,
       default: null,
+    },
+    customerFeedback: {
+      rating: { type: Number, min: 1, max: 5 },
+      comment: { type: String, default: "" },
+      isReported: { type: Boolean, default: false },
+      reportReason: { type: String, default: "" },
+      submittedAt: { type: Date },
     },
   },
   {
