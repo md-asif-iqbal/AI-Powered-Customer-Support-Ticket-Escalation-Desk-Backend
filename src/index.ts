@@ -8,7 +8,12 @@ import statsRoutes from "./routes/stats.js";
 import { runSeed } from "./scripts/seed.js";
 import { Ticket } from "./models/Ticket.js";
 
+import path from "path";
+
 dotenv.config();
+// Support running from monorepo root or backend directory
+dotenv.config({ path: path.resolve(process.cwd(), "backend/.env") });
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
