@@ -21,9 +21,13 @@ const PORT = process.env.PORT || 5001;
 // Middleware
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL || "http://localhost:3000", "http://localhost:3001", "http://127.0.0.1:3000"],
+    origin: [
+      process.env.FRONTEND_URL || "http://localhost:3000",
+      "http://localhost:3001",
+      "http://127.0.0.1:3000",
+    ],
     credentials: true,
-  })
+  }),
 );
 app.use(express.json());
 
@@ -36,7 +40,7 @@ app.use("/api/stats", statsRoutes);
 app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
-    service: "OmniDesk AI Backend API",
+    service: "Help Desk AI Backend API",
     models: {
       gemini: "gemini-3.8-flash",
       groq: "openai/gpt-oss-20b",
@@ -47,10 +51,19 @@ app.get("/health", (_req, res) => {
 });
 
 // Error handling middleware
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("[Server Error]:", err.stack);
-  res.status(500).json({ error: "Internal Server Error", message: err.message });
-});
+app.use(
+  (
+    err: Error,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    console.error("[Server Error]:", err.stack);
+    res
+      .status(500)
+      .json({ error: "Internal Server Error", message: err.message });
+  },
+);
 
 // Start server
 async function startServer() {
@@ -60,13 +73,17 @@ async function startServer() {
     // Auto-seed Atlas if clean/empty
     const count = await Ticket.countDocuments();
     if (count === 0) {
-      console.log("[Seed] Fresh database detected. Automatically seeding demo data...");
+      console.log(
+        "[Seed] Fresh database detected. Automatically seeding demo data...",
+      );
       await runSeed();
       console.log("[Seed] Demo users and tickets seeded into MongoDB Atlas.");
     }
 
     app.listen(PORT, () => {
-      console.log(`🚀 [Server] OmniDesk AI Backend running at http://localhost:${PORT}`);
+      console.log(
+        `🚀 [Server] Help Desk AI Backend running at http://localhost:${PORT}`,
+      );
     });
   } catch (err) {
     console.error("Failed to start server:", err);
