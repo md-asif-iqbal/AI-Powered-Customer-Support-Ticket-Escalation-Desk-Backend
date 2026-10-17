@@ -7,6 +7,7 @@ import { User } from "../models/User.js";
 import { requireAuth, AuthenticatedRequest } from "../middleware/auth.js";
 import { calculateSlaDeadline, checkAutoEscalationRules, evaluateSlaStatus } from "../services/sla.js";
 import { analyzeTicketWithAi } from "../services/ai.js";
+import { checkAndReassignInactiveTickets } from "../services/inactivityService.js";
 
 const router = Router();
 
@@ -37,6 +38,9 @@ const CommentSchema = z.object({
 // GET /api/tickets (Filterable list)
 router.get("/", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
+    // Check for inactive agents and auto-switch if threshold (15m) breached
+    await checkAndReassignInactiveTickets(15);
+
     const { status, priority, category, q, assignedToMe } = req.query;
     const andConditions: Record<string, unknown>[] = [];
 
@@ -469,8 +473,13 @@ router.post("/:id/comments", requireAuth, async (req: AuthenticatedRequest, res:
       isInternalNote: internalAllowed,
     });
 
-    if (ticket.status === "OPEN" && req.user?.role !== "CUSTOMER") {
-      ticket.status = "IN_PROGRESS";
+    if (req.user?.role !== "CUSTOMER") {
+      if (!ticket.firstResponseAt && !internalAllowed) {
+        ticket.firstResponseAt = new Date();
+      }
+      if (ticket.status === "OPEN") {
+        ticket.status = "IN_PROGRESS";
+      }
       await ticket.save();
     }
 
@@ -569,6 +578,21 @@ router.post("/:id/ai-analyze", requireAuth, async (req: AuthenticatedRequest, re
     res.json({ message: "AI re-analysis complete", aiAnalysis });
   } catch (error) {
     res.status(500).json({ error: "AI analysis failed" });
+  }
+});
+
+// POST /api/tickets/check-inactivity (Trigger AI inactivity auto-switch check)
+router.post("/check-inactivity", requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  try {
+    const thresholdMinutes = Number(req.query.thresholdMinutes || req.body?.thresholdMinutes || 15);
+    const results = await checkAndReassignInactiveTickets(thresholdMinutes);
+    res.json({
+      message: `AI inactivity check completed (threshold: ${thresholdMinutes}m)`,
+      reassignedCount: results.length,
+      reassignments: results,
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to run inactivity check" });
   }
 });
 

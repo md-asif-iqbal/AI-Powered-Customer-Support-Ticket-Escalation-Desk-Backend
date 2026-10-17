@@ -34,6 +34,10 @@ export interface ITicket extends Document {
   slaHours: number;
   slaDeadline: Date;
   slaBreached: boolean;
+  lastAssignedAt?: Date;
+  reassignmentCount?: number;
+  firstResponseAt?: Date | null;
+  firstResponseBreached?: boolean;
   resolvedAt?: Date | null;
   closedAt?: Date | null;
   tags: string[];
@@ -138,6 +142,24 @@ const TicketSchema = new Schema<ITicket>(
       index: true,
     },
     slaBreached: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    lastAssignedAt: {
+      type: Date,
+      default: Date.now,
+      index: true,
+    },
+    reassignmentCount: {
+      type: Number,
+      default: 0,
+    },
+    firstResponseAt: {
+      type: Date,
+      default: null,
+    },
+    firstResponseBreached: {
       type: Boolean,
       default: false,
       index: true,

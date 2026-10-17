@@ -7,6 +7,7 @@ import ticketRoutes from "./routes/tickets.js";
 import statsRoutes from "./routes/stats.js";
 import { runSeed } from "./scripts/seed.js";
 import { Ticket } from "./models/Ticket.js";
+import { startAgentInactivityWatchdog } from "./services/inactivityService.js";
 
 import path from "path";
 
@@ -84,6 +85,8 @@ async function startServer() {
       console.log(
         `🚀 [Server] Help Desk AI Backend running at http://localhost:${PORT}`,
       );
+      // Start background auto-switch watchdog (checks every 30s for 15-minute inactivity)
+      startAgentInactivityWatchdog(30000, 15);
     });
   } catch (err) {
     console.error("Failed to start server:", err);
