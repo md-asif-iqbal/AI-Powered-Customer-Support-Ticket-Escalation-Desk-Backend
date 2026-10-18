@@ -22,15 +22,38 @@ const PORT = process.env.PORT || 5001;
 // Middleware
 app.use(
   cors({
-    origin: [
-      process.env.FRONTEND_URL || "http://localhost:3000",
-      "http://localhost:3001",
-      "http://127.0.0.1:3000",
-    ],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      const allowed = [
+        process.env.FRONTEND_URL,
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3000",
+      ].filter(Boolean);
+
+      if (
+        allowed.includes(origin) ||
+        origin.endsWith(".vercel.app") ||
+        process.env.FRONTEND_URL === "*"
+      ) {
+        return callback(null, true);
+      }
+      return callback(null, true);
+    },
     credentials: true,
   }),
 );
 app.use(express.json());
+
+// Ensure DB connection for serverless requests (Vercel)
+app.use(async (_req, _res, next) => {
+  try {
+    await connectDB();
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 // Routes
 app.use("/api/auth", authRoutes);
@@ -94,4 +117,9 @@ async function startServer() {
   }
 }
 
-startServer();
+// Only start standalone listener when not running on Vercel Serverless
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
