@@ -55,6 +55,24 @@ app.use(async (_req, _res, next) => {
   }
 });
 
+// Welcome & Root Status Endpoint
+app.get("/", (_req, res) => {
+  res.json({
+    status: "online",
+    service: "NT DeskAI — Intelligent Customer Support & Ticket Escalation API",
+    version: "1.0.0",
+    message: "🚀 Backend server is running smoothly!",
+    health: "/health",
+    apiEndpoints: {
+      auth: "/api/auth",
+      tickets: "/api/tickets",
+      stats: "/api/stats",
+      leaderboard: "/api/stats/leaderboard",
+    },
+    documentation: "Refer to project README for API specifications.",
+  });
+});
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/tickets", ticketRoutes);
